@@ -1,0 +1,101 @@
+#!/usr/bin/ruby
+
+require 'rubygems' unless defined?(Gem)
+
+require 'gtk3' unless defined?(Gtk)
+require 'gettext' unless defined?(GetText)
+
+class UpdateNotifierIcon
+  include GetText
+
+
+  NORMAL_ICON = 'system-software-update'
+  ALERT_ICON = 'software-update-available'
+
+  attr_accessor :status_icon, :menu, :tooltip, :icon
+
+  def initialize
+    #bindtextdomain(File.basename($0).sub(/\.rb$/, ''))
+    bindtextdomain('update-notifier')
+
+    build_menu
+
+    status_icon.signal_connect('popup-menu') { |i,b,t| menu.popup(nil,nil, b,t) }
+
+    run_check
+  end
+
+  def start_schedule
+    Glib::Timeout.add_seconds(300) do
+      run_check
+    end
+  end
+
+  def status_icon
+    @status_icon ||= Gtk::StatusIcon.new
+  end
+
+  def menu
+    @menu ||= Gtk::Menu.new
+  end
+
+  def tooltip=(text)
+    @tooltip = text
+    status_icon.tooltip_text = @tooltip
+    status_icon.has_tooltip = !@tooltip.nil?
+  end
+  
+  def icon=(icon)
+    @icon = icon
+
+    status_icon.icon_name = @icon
+  end
+
+
+  def run_check
+    stats = %x{/usr/lib/update-notifier/apt-check 2>&1}.strip.split(';').collect(&:to_i)
+
+    if stats[0] > 0 then
+      human_stats = %x{/usr/lib/update-notifier/apt-check --human-readable}.sub(/\n\Z/, '')
+      self.icon = ALERT_ICON
+      self.tooltip = human_stats
+    else
+      self.icon = NORMAL_ICON
+      self.tooltip = _('Update Notifier')
+    end
+  end
+
+  private
+
+  def build_menu
+    
+    check_updates = Gtk::ImageMenuItem.new(stock_id: Gtk::Stock::REFRESH)
+    check_updates.label = _('Check for updates')
+    check_updates.signal_connect('activate') do
+      run_check
+    end
+    menu.append check_updates
+
+    run_manager = Gtk::ImageMenuItem.new
+    run_manager.image = Gtk::Image.new(icon_name: 'system-software-update', size: Gtk::IconSize::IconSize::MENU)
+    run_manager.label = _('Run upgrade')
+    run_manager.signal_connect('activate') do
+      (pid = fork) ? Process.detach(pid) : exec('update-manager')
+    end
+
+    menu.append run_manager
+    
+    menu.append Gtk::SeparatorMenuItem.new
+
+    quit = Gtk::ImageMenuItem.new(stock_id: Gtk::Stock::QUIT)
+    quit.signal_connect('activate') { Gtk.main_quit }
+    menu.append quit
+    
+    menu.show_all
+  end
+
+end
+
+app = UpdateNotifierIcon.new
+
+Gtk.main
